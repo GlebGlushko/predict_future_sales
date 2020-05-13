@@ -18,8 +18,8 @@ item_cats = pd.read_csv('./data/item_categories.csv')
 test = pd.read_csv('./data/test.csv').set_index('ID')
 submissions = pd.read_csv('./data/sample_submission.csv')
 
-# sales = sales[sales['shop_id'].isin([25, 26])]
-# test = test[test['shop_id'].isin([25, 26])]
+sales = sales[sales['shop_id'].isin([25, 27, 30, 31])]
+test = test[test['shop_id'].isin([25, 27, 30, 31])]
 
 print(test.shape)
 test['date_block_num'] = 34
@@ -41,8 +41,6 @@ index_cols = ['shop_id', 'item_id', 'date_block_num']
 # # sales['target'].fillna(0).clip(0, 20)
 
 
-sales = pd.concat([sales, test], ignore_index=True, sort=False, keys=index_cols)
-sales.fillna(0, inplace=True)
 
 print('concatenated test + train')
 
@@ -55,6 +53,8 @@ for block_num in sales['date_block_num'].unique():
 
 grid = pd.DataFrame(np.vstack(grid), columns=index_cols)
 
+gird = pd.concat([grid, test], ignore_index=True, sort=False, keys=index_cols)
+grid.fillna(0, inplace=True)
 
 print('created grid')
 
@@ -261,14 +261,90 @@ lgb_params = {
 
 lr.fit(x_train.values, y_train.values)
 lr_preds = lr.predict(x_test.values).clip(0, 20)
+valid_lr = lr.predict(x_valid).clip(0,20)
 print('lr done')
 xgb.fit(x_train, y_train)
 pred_xgb = xgb.predict(x_test).clip(0, 20)
+valid_xgb = xgb.predict(x_valid).clip(0,20)
 print('xgb done')
-knn = lightgbm.train(lgb_params, lightgbm.Dataset(x_train, label=y_train), num_boost_round=19)
-pred_knn = knn.predict(x_test).clip(0, 20)
-print('knn done')
-x_test_level2 = np.c_[lr_preds, pred_xgb, pred_knn]
+lgbm = lightgbm.train(lgb_params, lightgbm.Dataset(x_train, label=y_train), num_boost_round=19)
+pred_lgbm = lgbm.predict(x_test).clip(0, 20)
+valid_lgbm = lgbm.predict(x_valid).clip(0,20)
+print('lgbm done')
+# knn = KNeighborsRegressor(n_jobs=8)
+# knn.fit(x_train, y_train)
+# valid_knn = knn.predict(x_valid).clip(0,20)
+# pred_knn = knn.predict(x_test).clip(0,20)
+# print('knn done')
+
+best_l = 0.20
+best_lg = 0.14
+best_x = 0.66
+
+
+x_valid_2 = np.c_[valid_lr, valid_xgb, valid_lgbm]
+x_test_level2 = np.c_[lr_preds, pred_xgb, pred_lgbm]
+
+test_preds = best_l*x_test_level2[:, 0] + best_x * x_test_level2[:, 1] + best_lg * x_test_level2[:, 2]
+
+submissions_enseble = pd.DataFrame({
+    'ID': range(len(test_preds)),
+    'item_cnt_month': test_preds
+})
+
+submissions_enseble.to_csv('submission_ensemble.csv', index=False)
+exit()
+
+# '''
+best_mse = 100
+for l in np.arange(0, 1, 0.005):
+    for x in np.arange(0, 1-l, 0.005):
+        # print(l, x, k)
+        k=1-x-l
+        mix = l * x_valid_2[:, 0] + x * x_valid_2[:, 1] + k * x_valid_2[:, 2]
+        mse = mean_squared_error(y_valid, mix)
+        # print(mse)
+        if mse < best_mse:
+            best_mse = mse
+            best_l = l
+            best_lg = k
+            best_x = x
+            print('linear={0}\nxgboost={1}\nknn={2}\nlightgbm={3}\n'.format(best_l, best_x, -1, best_lg))
+
+# best_lg = 1 - best_lg - best_k - best_x
+
+print('linear={0}\nxgboost={1}\nknn={2}\nlightgbm={3}\n'.format(best_l, best_x, -1, best_lg))
+# '''
+exit()
+valids = pd.DataFrame({
+                      'lr': x_valid_2[:, 0],
+                      'xgb': x_valid_2[:, 1],
+                      # 'knn': x_valid_2[:, 2],
+                      'lgbm': x_valid_2[:, 2],
+                      })
+
+valids.to_csv('./data/created/valids2.csv')
+
+
+preds = pd.DataFrame({
+                      'lr': x_test_level2[:, 0],
+                      'xgb': x_test_level2[:, 1],
+                      'lgbm': x_test_level2[:, 2],
+                      # 'knn': x_test_level2[:, 2]
+                      })
+preds.to_csv('./data/created/level2.csv')
+
+test_preds = best_l*x_test_level2[:, 0] + best_x * x_test_level2[:, 1] + best_lg * x_test_level2[:, 2]
+
+submissions_enseble = pd.DataFrame({
+    'ID': range(len(test_preds)),
+    'item_cnt_month': test_preds
+})
+
+submissions_enseble.to_csv('submission_ensemble.csv', index=False)
+
+
+exit()
 # print(len(pred_xgb) )
 # print(len(x_test_level2))
 
